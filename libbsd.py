@@ -678,7 +678,6 @@ class mmc_ti(builder.Module):
         )
         self.addKernelSpaceSourceFiles(
             [
-                'sys/arm/freescale/imx/imx_gpio.c',
                 'sys/arm/ti/ti_hwmods.c',
                 'sys/arm/ti/ti_sdhci.c',
                 'sys/dev/gpio/gpiobus.c',
@@ -693,6 +692,7 @@ class mmc_ti(builder.Module):
             [
                 'local/sdhci_if.c',
                 'local/gpiobus_if.c',
+                'sys/arm/freescale/imx/imx_rtems_gpio.c',
             ],
             mm.generator['source']()
         )
