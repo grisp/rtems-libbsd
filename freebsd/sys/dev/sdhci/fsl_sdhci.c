@@ -74,9 +74,6 @@ uint32_t mpc85xx_get_system_clock(void);
 #endif /* __rtems__ */
 #endif
 
-#ifndef __rtems__
-#include <bsp.h>
-#endif /* __rtems__ */
 #include <dev/gpio/gpiobusvar.h>
 
 #include <dev/ofw/ofw_bus.h>
@@ -171,7 +168,6 @@ struct fsl_sdhci_softc {
 #define	 SDHC_PROT_CDSS		(1 << 7)
 
 #define	SDHC_SYS_CTRL		0x2c
-#ifdef __rtems__
 
 /*
  * Freescale messed up the INT DMA ERR bit and placed it at bit 28 instead of
@@ -180,7 +176,6 @@ struct fsl_sdhci_softc {
 #define SDHC_INT_DMAES		(1 << 28)
 
 #define	 SDHC_CAN_DO_ADMA2	0x00100000
-#endif /* __rtems__ */
 
 /*
  * The clock enable bits exist in different registers for ESDHC vs USDHC, but
@@ -362,7 +357,6 @@ fsl_sdhci_read_4(device_t dev, struct sdhci_slot *slot, bus_size_t off)
 		val32 &= ~SDHCI_CAN_VDD_180;
 		val32 &= ~SDHCI_CAN_DO_SUSPEND;
 		val32 |= SDHCI_CAN_DO_8BITBUS;
-#ifdef __rtems__
 		/*
 		 * Freescale signals ADMA2 capability via bit 20 (which would be
 		 * ADMA1) instead of 19.
@@ -371,7 +365,6 @@ fsl_sdhci_read_4(device_t dev, struct sdhci_slot *slot, bus_size_t off)
 			val32 &= ~SDHC_CAN_DO_ADMA2;
 			val32 |= SDHCI_CAN_DO_ADMA2;
 		}
-#endif /* __rtems__ */
 		return (val32);
 	}
 	
@@ -396,13 +389,11 @@ fsl_sdhci_read_4(device_t dev, struct sdhci_slot *slot, bus_size_t off)
 	 * command with an R1B response, mix it into the hardware status.
 	 */
 	if (off == SDHCI_INT_STATUS) {
-#ifdef __rtems__
 		/* Fix messed up DMA error. */
 		if (val32 & SDHC_INT_DMAES) {
 			val32 &= ~SDHC_INT_DMAES;
 			val32 |= SDHCI_INT_ADMAERR;
 		}
-#endif /* __rtems__ */
 		return (val32 | sc->r1bfix_intmask);
 	}
 
@@ -549,7 +540,6 @@ fsl_sdhci_write_4(device_t dev, struct sdhci_slot *slot, bus_size_t off, uint32_
 	if (off == SDHCI_INT_STATUS) {
 		sc->r1bfix_intmask &= ~val;
 	}
-#ifdef __rtems__
 	/* Fix messed up DMA error. */
 	if (off == SDHCI_INT_STATUS || off == SDHCI_INT_ENABLE || off == SDHCI_SIGNAL_ENABLE) {
 		if (val & SDHCI_INT_ADMAERR) {
@@ -557,7 +547,6 @@ fsl_sdhci_write_4(device_t dev, struct sdhci_slot *slot, bus_size_t off, uint32_
 			val |= SDHC_INT_DMAES;
 		}
 	}
-#endif /* __rtems__ */
 
 	WR4(sc, off, val);
 }
@@ -923,12 +912,22 @@ fsl_sdhci_attach(device_t dev)
 
 	sc->slot.quirks |= SDHCI_QUIRK_DATA_TIMEOUT_USES_SDCLK;
 
-#if !defined(__rtems__) || !defined(LIBBSP_ARM_IMX_BSP_H)
-	/*
-	 * DMA is not really broken, I just haven't implemented it yet.
-	 */
-	sc->slot.quirks |= SDHCI_QUIRK_BROKEN_DMA;
-#endif /* __rtems__ */
+	if (sc->hwtype != HWTYPE_USDHC) {
+		/*
+		 * DMA is only tested on imx6 uSDHC. Most likely ESDHC needs
+		 * different or additional workarounds.
+		 */
+		sc->slot.quirks |= SDHCI_QUIRK_BROKEN_DMA;
+	} else {
+		sc->slot.quirks |= SDHCI_QUIRK_BROKEN_SDMA_BOUNDARY;
+		/*
+		 * i.MX6ULL doesn't have the SDMA Buffer Boundary bits. Instead
+		 * the BLKSIZE is one bit larger and would overlap the Buffer
+		 * Boundary. Setting the Buffer Boundary to 4K makes sure that
+		 * the highest BLKSIZE bit is always 0.
+		 */
+		sc->slot.sdma_boundary = SDHCI_BLKSZ_SDMA_BNDRY_4K;
+	}
 
 	/*
 	 * Set the buffer watermark level to 128 words (512 bytes) for both read
