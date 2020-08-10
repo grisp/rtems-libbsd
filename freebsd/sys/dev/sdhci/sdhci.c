@@ -68,6 +68,9 @@ __FBSDID("$FreeBSD$");
 #include <rtems/bsd/local/sdhci_if.h>
 
 #include <rtems/bsd/local/opt_mmccam.h>
+#ifdef __rtems__
+#include <bsp.h>
+#endif /* __rtems__ */
 
 SYSCTL_NODE(_hw, OID_AUTO, sdhci, CTLFLAG_RD, 0, "sdhci driver");
 
@@ -783,6 +786,17 @@ sdhci_dma_alloc(struct sdhci_slot *slot)
 		else
 			slot->sdma_boundary = SDHCI_BLKSZ_SDMA_BNDRY_512K;
 	}
+#ifdef __rtems__
+#if defined(LIBBSP_ARM_IMX_BSP_H)
+	/*
+	 * i.MX6ULL doesn't have the SDMA Buffer Boundary bits. Instead the
+	 * BLKSIZE is one bit larger and would overlap the Buffer Boundary.
+	 * Setting the Buffer Boundary to 4K makes sure that the highest BLKSIZE
+	 * bit is always 0.
+	 */
+	slot->sdma_boundary = SDHCI_BLKSZ_SDMA_BNDRY_4K;
+#endif
+#endif /* __rtems__ */
 	slot->sdma_bbufsz = SDHCI_SDMA_BNDRY_TO_BBUFSZ(slot->sdma_boundary);
 
 	/*
@@ -1910,6 +1924,10 @@ sdhci_start_data(struct sdhci_slot *slot, const struct mmc_data *data)
 			    BUS_DMASYNC_PREWRITE);
 		}
 		WR4(slot, SDHCI_DMA_ADDRESS, slot->paddr);
+#ifdef __rtems__
+		/* Avoid PIO interrupt if we use DMA */
+		slot->intmask &= ~(SDHCI_INT_DATA_AVAIL | SDHCI_INT_SPACE_AVAIL);
+#endif /* __rtems__ */
 		/*
 		 * Interrupt aggregation: Mask border interrupt for the last
 		 * bounce buffer and unmask otherwise.
@@ -1958,15 +1976,27 @@ sdhci_finish_data(struct sdhci_slot *slot)
 		WR4(slot, SDHCI_SIGNAL_ENABLE,
 		    slot->intmask |= SDHCI_INT_RESPONSE);
 	}
+#ifdef __rtems__
+	/* Restore PIO interrupts in case they are necessary elsewhere */
+	if (slot->flags & SDHCI_USE_DMA) {
+		slot->intmask |= SDHCI_INT_DATA_AVAIL | SDHCI_INT_SPACE_AVAIL;
+	}
+#endif /* __rtems__ */
 	/* Unload rest of data from DMA buffer. */
 	if (!slot->data_done && (slot->flags & SDHCI_USE_DMA) &&
 	    slot->curcmd->data != NULL) {
 		if (data->flags & MMC_DATA_READ) {
 			left = data->len - slot->offset;
+#ifdef __rtems__
+		    if (left > 0) {
+#endif /* __rtems__ */
 			bus_dmamap_sync(slot->dmatag, slot->dmamap,
 			    BUS_DMASYNC_POSTREAD);
 			memcpy((u_char*)data->data + slot->offset, slot->dmamem,
 			    ulmin(left, slot->sdma_bbufsz));
+#ifdef __rtems__
+		    }
+#endif /* __rtems__ */
 		} else
 			bus_dmamap_sync(slot->dmatag, slot->dmamap,
 			    BUS_DMASYNC_POSTWRITE);
@@ -2227,8 +2257,15 @@ sdhci_data_irq(struct sdhci_slot *slot, uint32_t intmask)
 			    BUS_DMASYNC_POSTWRITE);
 		}
 		/* ... and reload it again. */
+#ifdef __rtems__
+		slot->offset += ulmin(left, sdma_bbufsz);
+#else /* __rtems__ */
 		slot->offset += sdma_bbufsz;
+#endif /* __rtems__ */
 		left = data->len - slot->offset;
+#ifdef __rtems__
+	    if (left > 0) {
+#endif /* __rtems__ */
 		if (data->flags & MMC_DATA_READ) {
 			bus_dmamap_sync(slot->dmatag, slot->dmamap,
 			    BUS_DMASYNC_PREREAD);
@@ -2248,6 +2285,9 @@ sdhci_data_irq(struct sdhci_slot *slot, uint32_t intmask)
 		}
 		/* Restart DMA. */
 		WR4(slot, SDHCI_DMA_ADDRESS, slot->paddr);
+#ifdef __rtems__
+	    }
+#endif /* __rtems__ */
 	}
 	/* We have got all data. */
 	if (intmask & SDHCI_INT_DATA_END) {
