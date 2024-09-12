@@ -66,10 +66,14 @@
 
 #include <bsp.h>
 
-#ifdef LIBBSP_ARM_STM32H7_BSP_H
+#if defined(LIBBSP_ARM_STM32H7_BSP_H) || defined(LIBBSP_ARM_STM32U5_BSP_H)
 
+#if defined(LIBBSP_ARM_STM32H7_BSP_H)
 #include <stm32h7/hal.h>
 #include <stm32h7/memory.h>
+#elif defined(LIBBSP_ARM_STM32U5_BSP_H)
+#include <stm32u5/hal.h>
+#endif
 
 #include <bsp/st-sdmmc-config.h>
 
@@ -153,6 +157,7 @@ struct st_sdmmc_softc {
 
 void st_sdmmc_idma_txrx(struct st_sdmmc_softc *sc, void *buf)
 {
+	#if defined(LIBBSP_ARM_STM32H7_BSP_H)
 	BSD_ASSERT(
 	    (buf >= (void*) stm32h7_memory_sdram_1_begin &&
 	     buf  < (void*) stm32h7_memory_sdram_1_end) ||
@@ -163,6 +168,14 @@ void st_sdmmc_idma_txrx(struct st_sdmmc_softc *sc, void *buf)
 	    (buf >= (void*) stm32h7_memory_quadspi_begin &&
 	     buf  < (void*) stm32h7_memory_quadspi_end));
 	sc->sdmmc->IDMABASE0 = (uintptr_t) buf;
+	#elif defined(LIBBSP_ARM_STM32U5_BSP_H)
+	BSD_ASSERT(
+	    (buf >= (void*) stm32u5_memory_octospi_1_begin &&
+	     buf  < (void*) stm32u5_memory_octospi_1_end) ||
+		(buf >= (void*) stm32u5_memory_int_sram_begin &&
+	     buf  < (void*) stm32u5_memory_int_sram_end));
+	sc->sdmmc->IDMABASER = (uintptr_t) buf;
+	#endif
 	sc->sdmmc->IDMACTRL = SDMMC_IDMA_IDMAEN;
 }
 
@@ -198,7 +211,11 @@ st_sdmmc_intr(void *arg)
 static int
 st_sdmmc_probe(device_t dev)
 {
+	#if defined(LIBBSP_ARM_STM32H7_BSP_H)
 	device_set_desc(dev, "STM32H7xx SDMMC Host");
+	#elif defined(LIBBSP_ARM_STM32U5_BSP_H)
+	device_set_desc(dev, "STM32U5xx SDMMC Host");
+	#endif
 	return (0);
 }
 
@@ -213,6 +230,7 @@ st_sdmmc_set_clock_and_bus(
 	uint32_t clkcr;
 
 	clkcr = SDMMC_CLKCR_NEGEDGE | SDMMC_CLKCR_PWRSAV | SDMMC_CLKCR_HWFC_EN;
+	// clkcr = 0x0;
 	clk_div = howmany(sc->sdmmc_ker_ck, freq) / 2;
 	if (clk_div > SDMMC_CLKCR_CLKDIV >> SDMMC_CLKCR_CLKDIV_Pos) {
 		clk_div = SDMMC_CLKCR_CLKDIV >> SDMMC_CLKCR_CLKDIV_Pos;
@@ -233,6 +251,10 @@ st_sdmmc_set_clock_and_bus(
 	}
 
 	sc->sdmmc->CLKCR = clkcr;
+
+	// TEST DELAY BLCK
+	// MODIFY_REG(sc->sdmmc->CLKCR, SDMMC_CLKCR_SELCLKRX, SDMMC_CLKCR_SELCLKRX_1);
+    // LL_DLYB_Enable(DLYB_SDMMC1);
 
 	return 0;
 }
@@ -343,6 +365,7 @@ st_sdmmc_attach(device_t dev)
 			device_printf(dev, "could not allocate dma buffer\n");
 			error = ENOMEM;
 		}
+		#if defined(LIBBSP_ARM_STM32H7_BSP_H)
 		BSD_ASSERT(
 		    ((void*) sc->dmabuf >= (void*) stm32h7_memory_sram_axi_begin &&
 		     (void*) sc->dmabuf < (void*) stm32h7_memory_sram_axi_end) ||
@@ -352,6 +375,13 @@ st_sdmmc_attach(device_t dev)
 		     (void*) sc->dmabuf < (void*) stm32h7_memory_sdram_2_end) ||
 		    ((void*) sc->dmabuf >= (void*) stm32h7_memory_quadspi_begin &&
 		     (void*) sc->dmabuf < (void*) stm32h7_memory_quadspi_end));
+		#elif defined(LIBBSP_ARM_STM32U5_BSP_H)
+		BSD_ASSERT(
+		    ((void*) sc->dmabuf >= (void*) stm32u5_memory_octospi_1_begin &&
+		     (void*) sc->dmabuf < (void*) stm32u5_memory_octospi_1_end) ||
+			((void*) sc->dmabuf >= (void*) stm32u5_memory_int_sram_begin &&
+		     (void*) sc->dmabuf < (void*) stm32u5_memory_int_sram_end));
+		#endif
 	}
 
 	if (error == 0) {
@@ -485,10 +515,12 @@ st_sdmmc_wait_irq(struct st_sdmmc_softc *sc)
 
 	if (error != 0) {
 		error = MMC_ERR_TIMEOUT;
-	} else if ((sc->intr_status &
+	} 
+	else if ((sc->intr_status &
 	    (SDMMC_STA_DTIMEOUT | SDMMC_STA_CTIMEOUT)) != 0) {
 		error = MMC_ERR_TIMEOUT;
-	} else if ((sc->intr_status & SDMMC_INT_ERROR_MASK) != 0) {
+	} 
+	else if ((sc->intr_status & SDMMC_INT_ERROR_MASK) != 0) {
 		error = MMC_ERR_FAILED;
 	}
 
@@ -602,7 +634,8 @@ st_sdmmc_cmd_do(struct st_sdmmc_softc *sc, struct mmc_command *cmd)
 		}
 		st_sdmmc_idma_txrx(sc, data);
 
-		sc->sdmmc->DTIMER = 0xFFFFFFFF;
+		// sc->sdmmc->DTIMER = 0xFFFFFFFF;
+		sc->sdmmc->DTIMER = 0xFFFFFFF;
 		sc->sdmmc->DLEN = xferlen;
 		sc->sdmmc->DCTRL = dctrl;
 
@@ -856,4 +889,4 @@ DRIVER_MODULE(st_sdmmc, nexus, st_sdmmc_driver, st_sdmmc_devclass, NULL, NULL);
 DRIVER_MODULE(mmc, st_sdmmc, mmc_driver, mmc_devclass, NULL, NULL);
 MODULE_DEPEND(st_sdmmc, mmc, 1, 1, 1);
 
-#endif /* LIBBSP_ARM_STM32H7_BSP_H */
+#endif /* LIBBSP_ARM_STM32H7_BSP_H || LIBBSP_ARM_STM32U5_BSP_H  */
