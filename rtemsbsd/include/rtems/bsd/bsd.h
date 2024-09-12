@@ -56,7 +56,7 @@ extern "C" {
  * The default memory size. Do not change, use
  * RTEMS_BSD_CONFIG_DOMAIN_PAGE_MBUFS_SIZE to override for your application.
  */
-#define RTEMS_BSD_ALLOCATOR_DOMAIN_PAGE_MBUF_DEFAULT (8 * 1024 * 1024)
+#define RTEMS_BSD_ALLOCATOR_DOMAIN_PAGE_MBUF_DEFAULT (4 * 1024 * 1024)
 
 typedef enum {
 	RTEMS_BSD_RES_IRQ = 1,
