@@ -217,6 +217,22 @@ RTEMS_BSD_DRIVER_USB_MASS;
 
 #include <stm32u5xx.h>
 
+static const rtems_bsd_device_resource dwcotg_res[] = {
+	{
+		.type = RTEMS_BSD_RES_MEMORY,
+		.start_request = 0,
+		.start_actual = USB_OTG_HS_BASE_NS
+	}, {
+		.type = RTEMS_BSD_RES_IRQ,
+		.start_request = 0,
+		.start_actual = OTG_HS_IRQn
+	}
+};
+RTEMS_BSD_DEFINE_NEXUS_DEVICE(dwcotg, 0, RTEMS_ARRAY_SIZE(dwcotg_res),
+    dwcotg_res);
+RTEMS_BSD_DRIVER_USB;
+RTEMS_BSD_DRIVER_USB_MASS;
+
 RTEMS_BSD_DRIVER_ST_SDMMC(0, SDMMC1_BASE, DLYB_SDMMC1_BASE, SDMMC1_IRQn);
 RTEMS_BSD_DRIVER_MMC; 
 
